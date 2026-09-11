@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#020604">
+<link rel="manifest" href="manifest.json">
+<title>NÃO OLHE PARA TRÁS — Multiplayer</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#020604;color:#eef2ee;font-family:Arial,sans-serif;touch-action:none}canvas{display:block;width:100vw;height:100dvh}
+.overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle,#10201688,#000e);z-index:10;padding:20px}.card{width:min(92vw,560px);max-height:92vh;overflow:auto;background:#061009;border:1px solid #435447;border-radius:20px;padding:22px;text-align:center}.card h1{letter-spacing:3px}.btn{width:100%;padding:14px;margin:6px 0;border:0;border-radius:13px;font-weight:900}.primary{background:#dce5df;color:#07110b}.dark{background:#1d2a20;color:#fff;border:1px solid #ffffff2a}.row{display:flex;gap:8px}.row>*{flex:1}input{width:100%;padding:13px;border-radius:12px;border:1px solid #ffffff33;background:#0d1710;color:#fff;margin:5px 0}.small{font-size:12px;color:#91a094}
+#lobby,#end{display:none}.players{margin:10px 0;text-align:left;background:#0b140e;padding:10px;border-radius:12px}
+#hud{position:fixed;inset:0;pointer-events:none}.panel{position:absolute;background:#07100bdd;border:1px solid #ffffff22;border-radius:12px;padding:8px 10px;text-shadow:0 2px 5px #000}.left{top:10px;left:10px}.right{top:10px;right:10px;font-size:11px}.bar{width:120px;height:8px;background:#111;border-radius:9px;overflow:hidden;margin:3px 0 6px}.fill{height:100%;background:#ddd}.life{background:#d34}.food{background:#d1a83b}.st{background:#dce5df}
+#touch{position:fixed;left:0;right:0;bottom:14px;display:flex;justify-content:space-between;align-items:end;padding:0 14px;pointer-events:none}
+#joy{pointer-events:auto;width:145px;height:145px;border:2px solid #ffffff28;border-radius:50%;position:relative;background:#ffffff0d}.stick{position:absolute;width:58px;height:58px;border-radius:50%;background:#ffffff44;left:50%;top:50%;margin:-29px}
+.actions{pointer-events:auto;display:grid;grid-template-columns:90px 90px;gap:8px;align-items:end}.actions button{border:1px solid #ffffff33;color:#fff;font-weight:900}.run{grid-column:2;grid-row:1/span 2;width:88px;height:88px;border-radius:50%;background:#701616}.trap,.place{height:46px;border-radius:14px;background:#253529}.trap{grid-column:1;grid-row:2}.place{grid-column:1;grid-row:1}
+#notice{position:fixed;top:24%;left:10%;right:10%;text-align:center;font-weight:900;font-size:19px;text-shadow:0 3px 8px #000;pointer-events:none}
+@media(max-width:390px){#joy{width:128px;height:128px}.actions{grid-template-columns:80px 80px}.run{width:78px;height:78px}.actions button{font-size:10px}}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="menu" class="overlay">
+  <div class="card">
+    <h1>NÃO OLHE PARA TRÁS</h1>
+    <p>Escolha como jogar.</p>
+    <input id="nick" maxlength="14" placeholder="Seu nome">
+    <button class="btn primary" id="solo">JOGAR SOLO</button>
+    <button class="btn dark" id="public">ENTRAR NA SALA PÚBLICA</button>
+    <button class="btn dark" id="duo">CRIAR SALA DUO</button>
+    <div class="row"><input id="code" maxlength="5" placeholder="Código"><button class="btn dark" id="join">ENTRAR</button></div>
+    <p class="small">Quanto mais jogadores, mais monstros, mais amuletos e menos recursos.</p>
+  </div>
+</div>
+
+<div id="lobby" class="overlay">
+  <div class="card">
+    <h2>LOBBY</h2>
+    <p>Sala: <b id="roomCode"></b></p>
+    <div id="playerList" class="players"></div>
+    <button class="btn primary" id="startBtn">INICIAR PARTIDA</button>
+    <p id="hostText" class="small"></p>
+  </div>
+</div>
+
+<div id="end" class="overlay">
+  <div class="card"><h2 id="endTitle"></h2><p id="endText"></p><button class="btn primary" onclick="location.reload()">VOLTAR AO MENU</button></div>
+</div>
+
+<div id="hud">
+  <div class="panel left">AMULETOS <span id="amuletCount">0/7</span><br>🪤 <span id="trapCount">0</span> &nbsp; 🧍 <span id="rescued">0</span></div>
+  <div class="panel right">
+    VIDA<div class="bar"><div id="life" class="fill life"></div></div>
+    FOME<div class="bar"><div id="food" class="fill food"></div></div>
+    ENERGIA<div class="bar"><div id="stam" class="fill st"></div></div>
+  </div>
+</div>
+<div id="notice"></div>
+
+<div id="touch">
+  <div id="joy"><div class="stick" id="stick"></div></div>
+  <div class="actions">
+    <button class="place" id="placeBtn">COLOCAR</button>
+    <button class="trap" id="trapBtn">ARMADILHA</button>
+    <button class="run" id="runBtn">CORRER</button>
+  </div>
+</div>
+
+<script>
+const cv=document.getElementById('game'),ctx=cv.getContext('2d');let W=innerWidth,H=innerHeight,dpr=1;
+function resize(){W=innerWidth;H=innerHeight;dpr=Math.min(devicePixelRatio||1,2);cv.width=W*dpr;cv.height=H*dpr;ctx.setTransform(dpr,0,0,dpr,0,0)}resize();addEventListener('resize',resize);
+let ws=null,myId=null,room=null,state=null,isHost=false,started=false,offline=false,soloState=null;
+const WORLD={w:5800,h:3600};
+function note(t){const n=document.getElementById('notice');n.textContent=t;clearTimeout(note.t);note.t=setTimeout(()=>n.textContent='',1800)}
+function nick(){return document.getElementById('nick').value.trim()||'Jogador'}
+
+function connect(mode,roomCode){
+  if(mode==='solo'){offline=true;startSolo();return}
+  const proto=location.protocol==='https:'?'wss':'ws';
+  ws=new WebSocket(`${proto}://${location.host}`);
+  ws.onopen=()=>ws.send(JSON.stringify({type:'join',mode,room:roomCode,nick:nick()}));
+  ws.onmessage=e=>{
+    const m=JSON.parse(e.data);
+    if(m.type==='hello')myId=m.id;
+    if(m.type==='error'){alert(m.message);location.reload()}
+    if(m.type==='joined'){room=m.room;isHost=m.isHost;showLobby()}
+    if(m.type==='lobby'){room=m.room;isHost=m.host===myId;renderLobby(m.players)}
+    if(m.type==='started'){started=true;document.getElementById('lobby').style.display='none';note(`Partida com ${m.config.playerCount} jogador(es): ${m.config.monsterCount} monstro(s), ${m.config.amuletCount} amuletos.`)}
+    if(m.type==='state'){state=m;started=m.started;renderHUD()}
+    if(m.type==='notice')note(m.message)
+    if(m.type==='win'){document.getElementById('end').style.display='flex';document.getElementById('endTitle').textContent='VOCÊS ESCAPARAM';document.getElementById('endText').textContent=m.winner+' atravessou o portão e abriu a saída para o grupo.'}
+  };
+}
+function showLobby(){document.getElementById('menu').style.display='none';document.getElementById('lobby').style.display='flex';document.getElementById('roomCode').textContent=room}
+function renderLobby(ps){showLobby();document.getElementById('playerList').innerHTML=ps.map(p=>'• '+p.nick+(p.id===myId?' (você)':'')).join('<br>');document.getElementById('startBtn').style.display=isHost?'block':'none';document.getElementById('hostText').textContent=isHost?'Você é o dono da sala. Inicie quando todos entrarem.':'Aguardando o dono iniciar.'}
+document.getElementById('solo').onclick=()=>connect('solo');
+document.getElementById('public').onclick=()=>connect('public');
+document.getElementById('duo').onclick=()=>connect('duo_create');
+document.getElementById('join').onclick=()=>connect('join',document.getElementById('code').value.toUpperCase());
+document.getElementById('startBtn').onclick=()=>ws&&ws.send(JSON.stringify({type:'start'}));
+
+let input={x:0,y:0,run:false},jid=null;const joy=document.getElementById('joy'),stick=document.getElementById('stick');
+function jset(x,y){const r=joy.getBoundingClientRect(),cx=r.left+r.width/2,cy=r.top+r.height/2;let dx=x-cx,dy=y-cy,m=Math.hypot(dx,dy)||1,max=48,k=Math.min(1,max/m);dx*=k;dy*=k;input.x=dx/max;input.y=dy/max;stick.style.transform=`translate(${dx}px,${dy}px)`;sendInput()}
+joy.onpointerdown=e=>{jid=e.pointerId;joy.setPointerCapture(jid);jset(e.clientX,e.clientY)};joy.onpointermove=e=>{if(e.pointerId===jid)jset(e.clientX,e.clientY)};joy.onpointerup=joy.onpointercancel=e=>{jid=null;input.x=input.y=0;stick.style.transform='';sendInput()};
+const run=document.getElementById('runBtn');run.onpointerdown=e=>{input.run=true;run.setPointerCapture(e.pointerId);sendInput()};run.onpointerup=run.onpointercancel=()=>{input.run=false;sendInput()};
+document.getElementById('trapBtn').onclick=()=>offline?soloTrap():ws?.send(JSON.stringify({type:'useTrap'}));
+document.getElementById('placeBtn').onclick=()=>offline?soloPlace():ws?.send(JSON.stringify({type:'place'}));
+function sendInput(){if(offline)return;if(ws&&ws.readyState===1&&started)ws.send(JSON.stringify({type:'input',x:input.x,y:input.y,run:input.run}))}
+
+function me(){return offline?soloState.player:(state?.players||[]).find(p=>p.id===myId)}
+function renderHUD(){
+ const p=me();if(!p)return;document.getElementById('life').style.width=p.life+'%';document.getElementById('food').style.width=p.food+'%';document.getElementById('stam').style.width=p.st+'%';document.getElementById('trapCount').textContent=p.traps;document.getElementById('rescued').textContent=p.rescued;const total=offline?soloState.amulets.length:state.config.amuletCount;const got=offline?soloState.amulets.filter(a=>a.taken).length:state.amulets.filter(a=>a.taken).length;document.getElementById('amuletCount').textContent=got+'/'+total
+}
+
+function startSolo(){
+ document.getElementById('menu').style.display='none';started=true;
+ soloState={player:{id:'solo',nick:nick(),x:420,y:1780,life:100,food:100,st:100,traps:0,rescued:0},amulets:[[900,920],[1320,2520],[1970,1510],[2850,720],[3500,2630],[4380,1180],[4870,2460]].map((a,i)=>({id:i,x:a[0],y:a[1],taken:false})),monsters:[{x:140,y:420,lure:null}],placed:false,gate:{x:5400,y:1490,w:90,h:290},pedestal:{x:5050,y:1740,r:75}};
+ note('Modo solo iniciado.');
+}
+function soloTrap(){const p=soloState.player;if(p.traps<=0)return note('Sem armadilhas.');p.traps--;const m=soloState.monsters[0],dx=p.x-m.x,dy=p.y-m.y,d=Math.hypot(dx,dy)||1;m.lure={x:p.x+dx/d*400,y:p.y+dy/d*400,t:7}}
+function soloPlace(){const p=soloState.player;if(soloState.amulets.every(a=>a.taken)&&Math.hypot(p.x-soloState.pedestal.x,p.y-soloState.pedestal.y)<100){soloState.placed=true;note('PORTÃO ABERTO!')}}
+function soloUpdate(dt){
+ if(!offline||!started)return;const p=soloState.player;let mag=Math.hypot(input.x,input.y),run=input.run&&p.st>2&&mag>.05,s=run?292:168;p.x=Math.max(15,Math.min(WORLD.w-15,p.x+input.x*s*dt));p.y=Math.max(15,Math.min(WORLD.h-15,p.y+input.y*s*dt));p.st=run?Math.max(0,p.st-34*dt):Math.min(100,p.st+19*dt);p.food=Math.max(0,p.food-.55*dt*(run?2:1));if(p.food<=0)p.life=Math.max(0,p.life-4.5*dt);
+ for(const a of soloState.amulets)if(!a.taken&&Math.hypot(p.x-a.x,p.y-a.y)<48)a.taken=true;
+ const m=soloState.monsters[0];let tx=p.x,ty=p.y;if(m.lure){m.lure.t-=dt;tx=m.lure.x;ty=m.lure.y;if(m.lure.t<=0)m.lure=null}let dx=tx-m.x,dy=ty-m.y,d=Math.hypot(dx,dy)||1;m.x+=dx/d*105*dt;m.y+=dy/d*105*dt;if(!m.lure&&Math.hypot(m.x-p.x,m.y-p.y)<32){p.life=Math.max(0,p.life-34);p.x+=90*(p.x-m.x)/(d||1);p.y+=90*(p.y-m.y)/(d||1)}
+ if(soloState.placed&&p.x>soloState.gate.x-80&&p.y>soloState.gate.y-20&&p.y<soloState.gate.y+soloState.gate.h+20){started=false;document.getElementById('end').style.display='flex';document.getElementById('endTitle').textContent='VOCÊ ESCAPOU';document.getElementById('endText').textContent='Você abriu o portão e saiu da floresta.'}renderHUD()
+}
+
+function draw(){
+ ctx.fillStyle='#08120b';ctx.fillRect(0,0,W,H);const p=me();if(!p)return;
+ const camX=Math.max(0,Math.min(WORLD.w-W,p.x-W/2)),camY=Math.max(0,Math.min(WORLD.h-H,p.y-H/2));
+ ctx.save();ctx.translate(-camX,-camY);
+ ctx.fillStyle='#0b160e';ctx.fillRect(0,0,WORLD.w,WORLD.h);
+ ctx.strokeStyle='#1d2a20';ctx.lineWidth=120;ctx.beginPath();for(let x=0;x<=WORLD.w;x+=80){let y=1780+Math.sin(x/660)*430+Math.sin(x/290)*70;x?ctx.lineTo(x,y):ctx.moveTo(x,y)}ctx.stroke();
+ const s=offline?soloState:state;if(!s){ctx.restore();return}
+ const ams=s.amulets||[];for(const a of ams)if(!a.taken){ctx.strokeStyle='#d8cf9d';ctx.lineWidth=3;ctx.strokeRect(a.x-12,a.y-12,24,24)}
+ const ped=s.pedestal||{x:5050,y:1740};ctx.strokeStyle=s.placed?'#d8cf9d':'#667067';ctx.lineWidth=6;ctx.beginPath();ctx.arc(ped.x,ped.y,62,0,Math.PI*2);ctx.stroke();
+ const g=s.gate||{x:5400,y:1490,w:90,h:290};ctx.fillStyle=s.placed?'#b8b18a':'#252b27';ctx.fillRect(g.x,g.y,g.w,g.h);
+ const mons=s.monsters||[];for(const m of mons){ctx.fillStyle='#020202';ctx.beginPath();ctx.arc(m.x,m.y,22,0,Math.PI*2);ctx.fill();ctx.fillStyle='#ddd';ctx.fillRect(m.x-7,m.y-5,3,3);ctx.fillRect(m.x+4,m.y-5,3,3)}
+ const ps=offline?[p]:(s.players||[]);for(const q of ps){ctx.fillStyle=q.id===myId||offline?'#fff':'#8fb79c';ctx.beginPath();ctx.arc(q.x,q.y,12,0,Math.PI*2);ctx.fill();ctx.fillStyle='#fff';ctx.font='12px Arial';ctx.fillText(q.nick,q.x-20,q.y-18)}
+ ctx.restore();
+ const grad=ctx.createRadialGradient(W/2,H/2,70,W/2,H/2,260);grad.addColorStop(0,'rgba(0,0,0,0)');grad.addColorStop(.65,'rgba(0,0,0,.25)');grad.addColorStop(1,'rgba(0,0,0,.95)');ctx.fillStyle=grad;ctx.fillRect(0,0,W,H)
+}
+let last=performance.now();function loop(t){const dt=Math.min(.05,(t-last)/1000);last=t;soloUpdate(dt);draw();requestAnimationFrame(loop)}requestAnimationFrame(loop);
+if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+</script>
+</body></html>
